@@ -12,7 +12,7 @@
     <div>
       <div class="title">玩家</div>
       <div>
-        <div v-for="player in players" :key="player.id" class="player-container">
+        <div v-for="player in alivePlayers" :key="player.id" class="player-container">
           <div
             :class="['ranking', {
               visible: getRanking(player) !== -1,
@@ -110,19 +110,19 @@ export default {
         this.history.push(round);
       } else {
         round = _.last(this.history);
-        if (round.length === this.roundSize) {
-          round = [];
-          // 开启新的轮次
-          this.history.push(round);
-        }
       }
+      const record = new Record(player);
+      round.push(record);
 
+      if (round.length === this.roundSize) {
+        round = [];
+        // 开启新的轮次
+        this.history.push(round);
+      }
       const length = this.history.length;
       /** 表示上一轮玩家 */
       const prevRound = this.history[length - 2] || [];
-      const record = new Record(player);
 
-      round.push(record);
       this.nextPlayers = this.getNextPlayers(prevRound);
     },
     handleClickReset() {

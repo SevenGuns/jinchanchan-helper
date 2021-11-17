@@ -3,8 +3,8 @@
     <div>
       <div class="title">记录</div>
       <div class="round-container">
-        <div v-if="!history.length" class="no-data">空空如也</div>
-        <div v-for="(round, roundIndex) in history" :key="roundIndex" class="round">
+        <div v-if="!game.history.length" class="no-data">空空如也</div>
+        <div v-for="(round, roundIndex) in game.history" :key="roundIndex" class="round">
           <div v-for="record in round" :key="record.id">{{record.desc || '-'}}</div>
         </div>
       </div>
@@ -15,11 +15,11 @@
         <div v-for="player in alivePlayers" :key="player.id" class="player-container">
           <div
             :class="['ranking', {
-              visible: getRanking(player) !== -1,
-              'ranking-1': getRanking(player) === 0,
-              'ranking-2': getRanking(player) === 1,
+              visible: getRank(player) !== -1,
+              'ranking-1': getRank(player) === 0,
+              'ranking-2': getRank(player) === 1,
             }]"
-          >{{getRanking(player) + 1}}</div>
+          >{{getRank(player) + 1}}</div>
           <el-input
             :class="['player-input', {
             'has-matched': hasMatched(player)
@@ -35,6 +35,7 @@
       </div>
       <div class="buttons">
         <el-button @click="handleClickReset">重置</el-button>
+        <el-button @click="handleClickLog">日志</el-button>
       </div>
     </div>
   </div>
@@ -43,6 +44,7 @@
 <script>
 import _ from 'lodash';
 import { ElMessageBox } from 'element-plus';
+// import LogModal from './LogModal.vue';
 import { Delete, Check, Close } from '@element-plus/icons';
 class Player {
   id = _.uniqueId('Player_');
@@ -60,6 +62,24 @@ class Record {
   desc = '';
 }
 
+class Game {
+  constructor() {
+    const { roundSize } = this;
+    const players = [];
+    for (let i = 0; i < roundSize; i++) {
+      const player = new Player();
+      players.push(player);
+    }
+    this.players = players;
+  }
+  /** 表示轮次的长度，初始为8名玩家，轮次为7，若玩家减少，则轮次变短 */
+  roundSize = 7;
+  history = [];
+  players = [];
+  /** 预测接下来可能出现的玩家 */
+  nextPlayers = [];
+}
+
 export default {
   mounted() {
     this.initData();
@@ -67,66 +87,64 @@ export default {
   computed: {
     /** 当前存活的玩家 */
     alivePlayers() {
-      return this.players.filter((player) => player.isAlive);
+      return this.game.players.filter((player) => player.isAlive);
     },
     /** 当前轮次 */
     round() {
-      return _.last(this.history) || [];
+      return _.last(this.game.history) || [];
+    },
+    /** 上一轮 */
+    prevRound() {
+      const length = this.game.history.length;
+      return this.game.history[length - 2] || [];
     },
     /** 当前轮次未匹配过的玩家 */
     unMatchedPlayers() {
       const matchedPlayers = this.round.map((record) => record.player);
       const matchedPlayersWeakSet = new WeakSet(matchedPlayers);
-      const unMatchedPlayers = this.alivePlayers.filter((player) =>
-        matchedPlayersWeakSet.has(player)
+      const unMatchedPlayers = this.alivePlayers.filter(
+        (player) => !matchedPlayersWeakSet.has(player)
       );
       return unMatchedPlayers;
     }
   },
   methods: {
-    getRanking(player) {
-      return this.nextPlayers.findIndex((item) => item.id === player.id);
+    getRank(player) {
+      return this.game.nextPlayers.findIndex((item) => item.id === player.id);
     },
     /** 当前轮次是否已经匹配过该玩家 */
     hasMatched(player) {
       return _.some(this.round, (record) => record.player.id === player.id);
     },
     initData() {
-      const { roundSize } = this;
-      const players = [];
-      for (let i = 0; i < roundSize; i++) {
-        const player = new Player();
-        players.push(player);
-      }
-      this.players = players;
-      this.history = [];
+      this.game = new Game();
     },
+
+    handleClickLog() {},
 
     handleClickCheck(player) {
       /** 表示轮次 */
       let round;
-      if (!this.history.length) {
+      if (!this.game.history.length) {
         round = [];
-        this.history.push(round);
+        this.game.history.push(round);
       } else {
-        round = _.last(this.history);
+        round = _.last(this.game.history);
       }
       const record = new Record(player);
       round.push(record);
 
-      if (round.length === this.roundSize) {
-        round = [];
+      this.updateRound();
+      this.updateNextPlayers();
+    },
+    updateRound() {
+      if (this.round.length === this.game.roundSize) {
+        const round = [];
         // 开启新的轮次
-        this.history.push(round);
+        this.game.history.push(round);
       }
-      const length = this.history.length;
-      /** 表示上一轮玩家 */
-      const prevRound = this.history[length - 2] || [];
-
-      this.nextPlayers = this.getNextPlayers(prevRound);
     },
     handleClickReset() {
-      console.log('players', this.players);
       ElMessageBox.confirm('确定要重置吗？').then(() => {
         this.initData();
       });
@@ -135,7 +153,9 @@ export default {
       // 玩家淘汰
       player.isAlive = false;
       // 轮次长度减少
-      this.roundSize = this.roundSize - 1;
+      this.game.roundSize = this.game.roundSize - 1;
+      this.updateRound();
+      this.updateNextPlayers();
     },
 
     /** 根据参考数组下标对当前数组排序 */
@@ -154,7 +174,12 @@ export default {
       });
     },
     /** 根据上一轮次情况预测本轮可能出现的玩家 */
-    getNextPlayers(prevRound) {
+    updateNextPlayers() {
+      const prevRound = this.prevRound;
+      /** 如果上一轮没有数据，则不进行预测 */
+      if (!prevRound.length) {
+        return;
+      }
       /**
        * 1. 从已存活的玩家中找本轮未匹配的玩家
        * 2. 根据上轮匹配次序排序
@@ -173,35 +198,32 @@ export default {
       );
 
       if (nextPlayers.length < size) {
-        /** 上一轮匹配中存活的玩家 */
-        const prevRoundPlayer = find(
-          _.find(prevRound, (record) => {
-            return record.player.isAlive;
-          })
-        );
-        if (prevRoundPlayer) {
-          nextPlayers.push(prevRoundPlayer);
+        /** 补位玩家 */
+        const subPlayers = this.round
+          .map((record) => record.player)
+          .filter((player) => player.isAlive)
+          .slice(0, size - nextPlayers.length);
+        if (subPlayers.length) {
+          nextPlayers = nextPlayers.concat(subPlayers);
         }
       }
 
       // TODO： 根据当前血量排序暂时先不做，涉及到拖拽排序的交互
       // nextPlayers = this.sortByIndex(nextPlayers, this.alivePlayers);
-
-      return nextPlayers;
+      this.game.nextPlayers = nextPlayers;
+      // return nextPlayers;
     }
   },
   data() {
     return {
-      /** 表示轮次的长度，初始为8名玩家，轮次为7，若玩家减少，则轮次变短 */
-      roundSize: 7,
-      history: [],
-      players: [],
-      /** 预测接下来可能出现的玩家 */
-      nextPlayers: [],
+      game: new Game(),
       Delete,
       Check,
       Close
     };
+  },
+  components: {
+    // LogModal
   }
 };
 </script>

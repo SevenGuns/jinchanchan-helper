@@ -60,6 +60,10 @@ class Record {
   }
   player = null;
   desc = '';
+  /** 指向上一轮 */
+  prev = null;
+  /** 指向下一轮 */
+  next = null;
 }
 
 class Game {
@@ -74,10 +78,55 @@ class Game {
   }
   /** 表示轮次的长度，初始为8名玩家，轮次为7，若玩家减少，则轮次变短 */
   roundSize = 7;
+  cur = null;
   history = [];
   players = [];
   /** 预测接下来可能出现的玩家 */
   nextPlayers = [];
+  findNextPlayer(player) {
+    let prev = this.cur.prev;
+    let next;
+    while (prev) {
+      if (prev.player.id === player.id) {
+        next = prev.next;
+        break;
+      }
+      prev = prev.prev;
+    }
+    // 寻找存活的玩家
+    while (next && !next.player.isAlive) {
+      next = next.next;
+    }
+    return next && next.player;
+  }
+  /** 增加预测玩家 */
+  addNextPlayers(player) {
+    if (player) {
+      this.nextPlayers.push(player);
+      return;
+    }
+    if (!this.nextPlayers.length) {
+      return;
+    }
+    const last = _.last(this.nextPlayers);
+    const next = this.findNextPlayer(last);
+    if (next) {
+      this.nextPlayers.push(next);
+    }
+  }
+  reduceNextPlayers(player) {
+    let idx = _.findIndex(this.nextPlayers, (item) => item.id === player.id);
+    if (idx === -1) {
+      return;
+    }
+    // 先增加
+    this.addNextPlayers();
+    idx = _.findIndex(this.nextPlayers, (item) => item.id === player.id);
+    if (idx !== -1) {
+      // 减少玩家
+      this.nextPlayers.splice(idx, 1);
+    }
+  }
 }
 
 export default {
@@ -123,7 +172,44 @@ export default {
     handleClickLog() {},
 
     handleClickCheck(player) {
-      /** 表示轮次 */
+      /** 更新轮次 */
+      this.updateRound();
+      const prev = this.game.cur;
+      const cur = new Record(player);
+      if (prev) {
+        prev.next = cur;
+        cur.prev = prev;
+      }
+      this.game.cur = cur;
+      this.round.push(cur);
+
+      if (!this.prevRound.length && this.unMatchedPlayers.length === 1) {
+        this.game.addNextPlayers(this.unMatchedPlayers[0]);
+        this.game.addNextPlayers(this.round[0].player);
+        return;
+      }
+
+      const idx = _.findIndex(
+        this.game.nextPlayers,
+        (item) => item.id === player.id
+      );
+      // 预测正确
+      if (idx !== -1) {
+        this.game.reduceNextPlayers(player);
+        return;
+      }
+      // 预测错误
+      const nextPlayer = this.game.findNextPlayer(player);
+      this.game.addNextPlayers(nextPlayer);
+    },
+    handleClickDelete(player) {
+      // 玩家淘汰
+      player.isAlive = false;
+      // 轮次长度减少
+      this.game.roundSize = this.game.roundSize - 1;
+      this.game.reduceNextPlayers(player);
+    },
+    updateRound() {
       let round;
       if (!this.game.history.length) {
         round = [];
@@ -131,87 +217,18 @@ export default {
       } else {
         round = _.last(this.game.history);
       }
-      const record = new Record(player);
-      round.push(record);
-
-      this.updateRound();
-      this.updateNextPlayers();
-    },
-    updateRound() {
-      if (this.round.length === this.game.roundSize) {
-        const round = [];
+      // 开启新轮次
+      if (round.length >= this.game.roundSize) {
+        round = [];
         // 开启新的轮次
         this.game.history.push(round);
       }
+      return round;
     },
     handleClickReset() {
       ElMessageBox.confirm('确定要重置吗？').then(() => {
         this.initData();
       });
-    },
-    handleClickDelete(player) {
-      // 玩家淘汰
-      player.isAlive = false;
-      // 轮次长度减少
-      this.game.roundSize = this.game.roundSize - 1;
-      this.updateRound();
-      this.updateNextPlayers();
-    },
-
-    /** 根据参考数组下标对当前数组排序 */
-    sortByIndex(players, referenceArr) {
-      const ret = [...players];
-      return ret.sort((acc, cur) => {
-        const accIndex = _.findIndex(
-          referenceArr,
-          (item) => item.id === acc.id
-        );
-        const curIndex = _.findIndex(
-          referenceArr,
-          (item) => item.id === cur.id
-        );
-        return accIndex - curIndex;
-      });
-    },
-    /** 根据上一轮次情况预测本轮可能出现的玩家 */
-    updateNextPlayers() {
-      const prevRound = this.prevRound;
-      /** 如果上一轮没有数据，则不进行预测 */
-      if (!prevRound.length) {
-        return;
-      }
-      /**
-       * 1. 从已存活的玩家中找本轮未匹配的玩家
-       * 2. 根据上轮匹配次序排序
-       * 3. 每次匹配2名玩家，如果不足2名，则补充上轮中第一位玩家（已存活）
-       */
-
-      const prevRoundPlayers = _.map(prevRound, (record) => record.player);
-      const size = 2;
-
-      let nextPlayers = [...this.unMatchedPlayers];
-
-      /** 根据上轮匹配顺序排序， 取前两名 */
-      nextPlayers = this.sortByIndex(nextPlayers, prevRoundPlayers).slice(
-        0,
-        size
-      );
-
-      if (nextPlayers.length < size) {
-        /** 补位玩家 */
-        const subPlayers = this.round
-          .map((record) => record.player)
-          .filter((player) => player.isAlive)
-          .slice(0, size - nextPlayers.length);
-        if (subPlayers.length) {
-          nextPlayers = nextPlayers.concat(subPlayers);
-        }
-      }
-
-      // TODO： 根据当前血量排序暂时先不做，涉及到拖拽排序的交互
-      // nextPlayers = this.sortByIndex(nextPlayers, this.alivePlayers);
-      this.game.nextPlayers = nextPlayers;
-      // return nextPlayers;
     }
   },
   data() {

@@ -121,11 +121,8 @@ class Game {
     }
     // 先增加
     this.addNextPlayers();
-    idx = _.findIndex(this.nextPlayers, (item) => item.id === player.id);
-    if (idx !== -1) {
-      // 减少玩家
-      this.nextPlayers.splice(idx, 1);
-    }
+    // 剔除玩家
+    this.nextPlayers = this.nextPlayers.filter((item) => item.id !== player.id);
   }
 }
 
@@ -183,7 +180,11 @@ export default {
       this.game.cur = cur;
       this.round.push(cur);
 
-      if (!this.prevRound.length && this.unMatchedPlayers.length === 1) {
+      if (
+        !this.prevRound.length &&
+        this.unMatchedPlayers.length === 1 &&
+        !this.game.nextPlayers.length
+      ) {
         this.game.addNextPlayers(this.unMatchedPlayers[0]);
         this.game.addNextPlayers(this.round[0].player);
         return;
